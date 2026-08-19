@@ -1,11 +1,18 @@
 from __future__ import annotations
+
+import json
+from pathlib import Path
 from typing import List
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    # Cargar siempre el .env correcto (backend/.env) aunque se ejecute uvicorn desde la raíz del repo
+    model_config = SettingsConfigDict(
+        env_file=str(Path(__file__).resolve().parents[2] / ".env"),
+        extra="ignore",
+    )
 
     # App
     APP_ENV: str = "local"
@@ -31,7 +38,29 @@ class Settings(BaseSettings):
     DATABRICKS_SCOPE: str = "2ff814a6-3304-4ab8-85cb-cd0e6f879c1d/.default"
 
     def cors_origins_list(self) -> List[str]:
-        return [o.strip() for o in self.CORS_ORIGINS.split(",") if o.strip()]
+        """
+        Acepta:
+          - CSV: "http://localhost:5173,http://localhost:5174"
+          - Con comillas: "\"http://localhost:5174\""
+          - JSON list: ["http://localhost:5173","http://localhost:5174"]
+        """
+        raw = (self.CORS_ORIGINS or "").strip()
+        if not raw:
+            return []
+
+        # JSON list
+        if raw.startswith("["):
+            try:
+                parsed = json.loads(raw)
+                if isinstance(parsed, list):
+                    return [str(o).strip().strip("\"'") for o in parsed if str(o).strip()]
+            except Exception:
+                # fallback a CSV
+                pass
+
+        # CSV
+        parts = raw.split(",")
+        return [p.strip().strip("\"'") for p in parts if p.strip()]
 
 
 settings = Settings()
