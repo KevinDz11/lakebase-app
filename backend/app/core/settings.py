@@ -21,7 +21,12 @@ class Settings(BaseSettings):
     # CORS
     CORS_ORIGINS: str = "http://localhost:5173"
 
-    # Lakebase (PostgreSQL)
+    # Databricks SQL (Warehouse/Lakehouse Federation, usando databricks-sql-connector)
+    DATABRICKS_SERVER_HOSTNAME: str = ""
+    DATABRICKS_HTTP_PATH: str = ""
+    DATABRICKS_TOKEN: str = ""
+
+    # Lakebase (PostgreSQL) - deprecado para este MVP si usas Databricks SQL
     # Nota: en dev pueden venir vacíos; los endpoints fallarán con 500 hasta configurar backend/.env
     LAKEBASE_HOST: str = ""
     LAKEBASE_PORT: int = 5432
