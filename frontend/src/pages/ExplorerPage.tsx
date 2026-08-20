@@ -11,29 +11,34 @@ type ColumnInfo = {
 type Row = Record<string, unknown>;
 
 export function ExplorerPage() {
+  const [catalogs, setCatalogs] = useState<string[]>([]);
+  const [catalog, setCatalog] = useState<string>("");
+
   const [schemas, setSchemas] = useState<string[]>([]);
   const [schema, setSchema] = useState<string>("");
+
   const [tables, setTables] = useState<TableInfo[]>([]);
   const [table, setTable] = useState<string>("");
+
   const [columns, setColumns] = useState<ColumnInfo[]>([]);
   const [rows, setRows] = useState<Row[]>([]);
   const [error, setError] = useState<string>("");
   const [loading, setLoading] = useState(false);
 
   const selectedTable = useMemo(() => {
-    if (!schema || !table) return null;
-    return { schema, table };
-  }, [schema, table]);
+    if (!catalog || !schema || !table) return null;
+    return { catalog, schema, table };
+  }, [catalog, schema, table]);
 
   useEffect(() => {
     let cancelled = false;
     setError("");
     setLoading(true);
-    apiGet<string[]>("/api/explorer/schemas")
+    apiGet<string[]>("/api/explorer/catalogs")
       .then((data) => {
         if (cancelled) return;
-        setSchemas(data);
-        if (data.length && !schema) setSchema(data[0]);
+        setCatalogs(data);
+        if (data.length && !catalog) setCatalog(data[0]);
       })
       .catch((e) => setError(String(e)))
       .finally(() => setLoading(false));
@@ -44,14 +49,39 @@ export function ExplorerPage() {
   }, []);
 
   useEffect(() => {
-    if (!schema) return;
+    if (!catalog) return;
+    let cancelled = false;
+    setError("");
+    setLoading(true);
+    setSchemas([]);
+    setSchema("");
+    setTables([]);
+    setTable("");
+
+    apiGet<string[]>(
+      `/api/explorer/catalogs/${encodeURIComponent(catalog)}/schemas`,
+    )
+      .then((data) => {
+        if (cancelled) return;
+        setSchemas(data);
+        if (data.length) setSchema(data[0]);
+      })
+      .catch((e) => setError(String(e)))
+      .finally(() => setLoading(false));
+    return () => {
+      cancelled = true;
+    };
+  }, [catalog]);
+
+  useEffect(() => {
+    if (!catalog || !schema) return;
     let cancelled = false;
     setError("");
     setLoading(true);
     setTables([]);
     setTable("");
     apiGet<TableInfo[]>(
-      `/api/explorer/schemas/${encodeURIComponent(schema)}/tables`,
+      `/api/explorer/catalogs/${encodeURIComponent(catalog)}/schemas/${encodeURIComponent(schema)}/tables`,
     )
       .then((data) => {
         if (cancelled) return;
@@ -62,7 +92,7 @@ export function ExplorerPage() {
     return () => {
       cancelled = true;
     };
-  }, [schema]);
+  }, [catalog, schema]);
 
   useEffect(() => {
     if (!selectedTable) return;
@@ -71,12 +101,16 @@ export function ExplorerPage() {
     setLoading(true);
     Promise.all([
       apiGet<ColumnInfo[]>(
-        `/api/explorer/schemas/${encodeURIComponent(
+        `/api/explorer/catalogs/${encodeURIComponent(
+          selectedTable.catalog,
+        )}/schemas/${encodeURIComponent(
           selectedTable.schema,
         )}/tables/${encodeURIComponent(selectedTable.table)}/describe`,
       ),
       apiGet<Row[]>(
-        `/api/explorer/schemas/${encodeURIComponent(
+        `/api/explorer/catalogs/${encodeURIComponent(
+          selectedTable.catalog,
+        )}/schemas/${encodeURIComponent(
           selectedTable.schema,
         )}/tables/${encodeURIComponent(selectedTable.table)}/preview?limit=20`,
       ),
@@ -112,11 +146,26 @@ export function ExplorerPage() {
         }}
       >
         <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <span>Catalog</span>
+          <select
+            value={catalog}
+            onChange={(e) => setCatalog(e.target.value)}
+            disabled={loading}
+          >
+            {catalogs.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
           <span>Schema</span>
           <select
             value={schema}
             onChange={(e) => setSchema(e.target.value)}
-            disabled={loading}
+            disabled={loading || !catalog}
           >
             {schemas.map((s) => (
               <option key={s} value={s}>
@@ -131,7 +180,7 @@ export function ExplorerPage() {
           <select
             value={table}
             onChange={(e) => setTable(e.target.value)}
-            disabled={loading}
+            disabled={loading || !catalog || !schema}
           >
             <option value="">—</option>
             {tables.map((t) => (

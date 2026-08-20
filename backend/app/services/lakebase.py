@@ -38,58 +38,66 @@ def _connect() -> sql.Connection:
     )
 
 
-def list_schemas() -> List[str]:
-    sql_text = """
-    select schema_name
-    from information_schema.schemata
-    where schema_name not in ('pg_catalog','information_schema')
-    order by schema_name
-    """
+def list_catalogs() -> List[str]:
     with _connect() as conn, conn.cursor() as cur:
-        cur.execute(sql_text)
+        cur.execute("SHOW CATALOGS")
         return [r[0] for r in cur.fetchall()]
 
 
-def list_tables(schema: str) -> List[Tuple[str, str]]:
-    sql_text = """
-    select table_name, table_type
-    from information_schema.tables
-    where table_schema = %(schema)s
-    order by table_name
-    """
+def list_schemas(catalog: str) -> List[str]:
+    # En Databricks SQL, SHOW SCHEMAS no acepta quotes en el nombre del catálogo.
+    # Ejemplo válido: SHOW SCHEMAS IN samples
     with _connect() as conn, conn.cursor() as cur:
-        cur.execute(sql_text, {"schema": schema})
-        return [(r[0], r[1]) for r in cur.fetchall()]
+        cur.execute(f"SHOW SCHEMAS IN {catalog}")
+        return [r[0] for r in cur.fetchall()]
 
 
-def describe_table(schema: str, table: str) -> List[Dict[str, Any]]:
-    sql_text = """
-    select
-      column_name,
-      data_type,
-      is_nullable,
-      ordinal_position
-    from information_schema.columns
-    where table_schema = %(schema)s and table_name = %(table)s
-    order by ordinal_position
-    """
+def list_tables(catalog: str, schema: str) -> List[Tuple[str, str]]:
     with _connect() as conn, conn.cursor() as cur:
-        cur.execute(sql_text, {"schema": schema, "table": table})
+        # Igual: sin quotes.
+        cur.execute(f"SHOW TABLES IN {catalog}.{schema}")
         rows = cur.fetchall()
-        return [
-            {
-                "column_name": r[0],
-                "data_type": r[1],
-                "is_nullable": r[2],
-                "ordinal_position": r[3],
-            }
-            for r in rows
-        ]
+        out: List[Tuple[str, str]] = []
+        for r in rows:
+            table_name = r[1] if len(r) > 1 else r[0]
+            out.append((table_name, "TABLE"))
+        return out
 
 
-def preview_rows(schema: str, table: str, limit: int = 20) -> List[Dict[str, Any]]:
+def describe_table(catalog: str, schema: str, table: str) -> List[Dict[str, Any]]:
+    # Evitar information_schema y quotes; usar DESCRIBE TABLE en Unity Catalog
+    with _connect() as conn, conn.cursor() as cur:
+        cur.execute(f"DESCRIBE TABLE {catalog}.{schema}.{table}")
+        rows = cur.fetchall()
+
+        # Databricks devuelve columnas tipo: col_name, data_type, comment
+        # y luego secciones (# Partition Information, etc). Filtramos.
+        out: List[Dict[str, Any]] = []
+        pos = 1
+        for r in rows:
+            col_name = (r[0] or "").strip() if len(r) > 0 else ""
+            data_type = (r[1] or "").strip() if len(r) > 1 else ""
+            if not col_name or col_name.startswith("#"):
+                continue
+            if col_name.lower() in ("partition", "col_name"):
+                continue
+            out.append(
+                {
+                    "column_name": col_name,
+                    "data_type": data_type,
+                    "is_nullable": "",
+                    "ordinal_position": pos,
+                }
+            )
+            pos += 1
+        return out
+
+
+def preview_rows(
+    catalog: str, schema: str, table: str, limit: int = 20
+) -> List[Dict[str, Any]]:
     limit = max(1, min(int(limit), 200))
-    sql_text = f'SELECT * FROM "{schema}"."{table}" LIMIT {limit}'
+    sql_text = f"SELECT * FROM {catalog}.{schema}.{table} LIMIT {limit}"
     with _connect() as conn, conn.cursor() as cur:
         cur.execute(sql_text)
         cols = [d[0] for d in cur.description] if cur.description else []
